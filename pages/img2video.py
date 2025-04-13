@@ -35,7 +35,6 @@ st.markdown("Convert images to AI-generated videos using **Segmind's Kling 1.6**
 API_ENDPOINTS = [
     "https://api.segmind.com/v1/kling-image2video",
     "https://api.segmind.com/v1/kling-1.6-image2video",
-    "https://fal.ai/models/fal-ai/kling-video/v1.6/pro/image-to-video"  # Alternative endpoint
 ]
 
 # API key input
@@ -81,16 +80,11 @@ with col1:
     cfg_scale = st.slider("CFG Scale", 0.0, 1.0, 0.5, 0.1,
                          help="Prompt adherence strength (0=creative, 1=strict)")
 with col2:
-    mode = st.selectbox("Quality Mode", options=["pro", "standard", "fast"], index=0,
-                       help="Pro: High quality (slow), Fast: Quick results")
+    mode = st.selectbox("Quality Mode", options=["pro", "std"], index=0,
+                       help="Pro: High quality, Std: Standard quality")
 with col3:
-    duration = st.selectbox("Duration", options=list(range(1, 11)), index=4,
+    duration = st.selectbox("Duration", options=[5, 10], index=0,
                            format_func=lambda x: f"{x} seconds")
-
-# Mutable endpoint configuration
-st.subheader("🔧 API Configuration")
-selected_endpoint = st.selectbox("API Endpoint", options=API_ENDPOINTS, index=0,
-                                help="Try alternative endpoints if experiencing issues")
 
 # Video generation
 if st.button("🎬 Generate Video", type="primary", use_container_width=True):
@@ -119,7 +113,7 @@ if st.button("🎬 Generate Video", type="primary", use_container_width=True):
 
             try:
                 response = requests.post(
-                    selected_endpoint,
+                    API_ENDPOINTS[0],  # Use primary endpoint
                     json=payload,
                     headers=headers,
                     timeout=(10, 120)  # Connect timeout 10s, read timeout 120s
@@ -162,7 +156,7 @@ if st.button("🎬 Generate Video", type="primary", use_container_width=True):
                     
                     with st.expander("Diagnostic Information"):
                         st.json({
-                            "endpoint": selected_endpoint,
+                            "endpoint": API_ENDPOINTS[0],
                             "payload_keys": list(payload.keys()),
                             "image_size": f"{len(image_base64)//1024}KB",
                             "error_details": error_details
@@ -170,6 +164,8 @@ if st.button("🎬 Generate Video", type="primary", use_container_width=True):
                     
                     if response.status_code == 401:
                         st.warning("Check your API key validity and permissions")
+                    elif response.status_code == 406:
+                        st.warning("Invalid parameters - ensure duration is 5/10s and mode is pro/std")
                     elif response.status_code == 413:
                         st.warning("Image too large - try resizing below 5MB")
                     elif response.status_code >= 500:
@@ -179,17 +175,21 @@ if st.button("🎬 Generate Video", type="primary", use_container_width=True):
                 st.error(f"Network error: {str(e)}")
                 st.progress(0, text="Retrying with alternative endpoint...")
                 
-                # Fallback to endpoints
-                for endpoint in API_ENDPOINTS:
-                    if endpoint != selected_endpoint:
-                        try:
-                            response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
-                            if response.status_code == 200:
-                                st.success("✅ Success on fallback endpoint!")
-                                st.video(response.content)
-                                break
-                        except:
-                            continue
+                # Fallback to secondary endpoint
+                try:
+                    response = requests.post(
+                        API_ENDPOINTS[1],
+                        json=payload,
+                        headers=headers,
+                        timeout=120
+                    )
+                    if response.status_code == 200:
+                        st.success("✅ Success on fallback endpoint!")
+                        st.video(response.content)
+                    else:
+                        st.error(f"Fallback failed (HTTP {response.status_code})")
+                except RequestException as e:
+                    st.error(f"Critical failure: {str(e)}")
 
 # Monitoring section
 with st.expander("API Health Monitoring"):
@@ -200,7 +200,8 @@ with st.expander("API Health Monitoring"):
         test_payload = {
             "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",  # 1px transparent PNG
             "prompt": "test",
-            "duration": 1
+            "duration": 5,
+            "mode": "std"
         }
         
         with st.spinner("Testing connectivity..."):
@@ -232,7 +233,7 @@ with st.expander("API Health Monitoring"):
 st.markdown("---")
 st.caption("""
 **Troubleshooting Tips**  
-1. For 502 errors: Try switching endpoints in API Configuration  
-2. For slow responses: Use 'fast' mode and 5s duration  
+1. For 406 errors: Ensure duration is 5/10s and mode is pro/std  
+2. For slow responses: Use 'std' mode with 5s duration  
 3. For quality issues: Use 'pro' mode with detailed motion prompts  
 """)
