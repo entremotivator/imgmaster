@@ -1,117 +1,100 @@
 import streamlit as st
+import requests
+import base64
 from PIL import Image
-import datetime
-import uuid
 import io
-import os
 
-st.set_page_config(
-    page_title="Image Upload and Management",
-    page_icon="📷",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Sidebar for API key
+st.sidebar.title("🔑 API Settings")
+api_key = st.sidebar.text_input("Enter your API Key", type="password")
 
-# Function to handle image upload
-def upload_image():
-    uploaded_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        return image
-    return None
+st.title("🎬 Kling Image-to-Video Generator")
 
-# Function to save uploaded image
-def save_uploaded_image(image, filename):
-    image.save(filename)
-    return filename
+# Helper functions
+def image_file_to_base64(uploaded_file):
+    """Convert uploaded image file to base64."""
+    image = Image.open(uploaded_file)
+    buffer = io.BytesIO()
+    save_format = image.format if image.format else "PNG"
+    image.save(buffer, format=save_format)
+    img_bytes = buffer.getvalue()
+    return base64.b64encode(img_bytes).decode('utf-8')
 
-# Function to save image history and manage exports
-def save_image(image_buffer, filename):
+def image_url_to_base64(image_url):
+    """Fetch image from URL and convert to base64."""
     try:
-        with open(filename, 'wb') as f:
-            f.write(image_buffer.getbuffer())
-        return filename
-    except IOError as e:
-        return f"Error saving file: {e}"
+        response = requests.get(image_url)
+        response.raise_for_status()
+        return base64.b64encode(response.content).decode('utf-8')
+    except Exception as e:
+        st.error(f"❌ Failed to fetch image from URL: {e}")
+        return None
 
-def export_all_images(image_history):
-    export_folder = os.path.join('outputs', uuid.uuid4().hex)
-    if not os.path.exists(export_folder):
-        os.makedirs(export_folder)
+# User selects input method
+input_method = st.radio("Choose image input method:", ["Upload Image", "Image URL"])
 
-    saved_files = []
-    for item in image_history:
-        file_path = os.path.join(export_folder, item['filename'])
-        result = save_image(item['image'], file_path)
-        if "Error" not in result:
-            saved_files.append(result)
+# Form for user inputs
+with st.form("kling_form"):
+    if input_method == "Upload Image":
+        uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "webp"])
+        if uploaded_file:
+            st.image(Image.open(uploaded_file), caption="Uploaded Image", use_column_width=True)
+    else:
+        image_url = st.text_input("Image URL", "https://segmind-sd-models.s3.amazonaws.com/display_images/kling_ip.jpeg")
 
-    return saved_files, export_folder
+    prompt = st.text_input("Prompt", "Kitten riding in an aeroplane and looking out the window.")
+    negative_prompt = st.text_input("Negative Prompt", "No sudden movements, no fast zooms.")
+    duration = st.slider("Video Duration (seconds)", min_value=5, max_value=10, value=5, step=5)
+    version = st.selectbox("Kling Version", ["1.6", "1.5"])
+    submitted = st.form_submit_button("Generate Video")
 
-def main():
-    st.title("Image Upload and Management")
-    st.sidebar.image("assets/header.png")
-    st.sidebar.title("Upload and Manage Images")
-    
-    # Image upload section in the sidebar
-    uploaded_image = upload_image()
-    
-    if uploaded_image:
-        # Save uploaded image to folder
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        unique_id = uuid.uuid4().hex
-        filename = f"uploaded_image_{timestamp}_{unique_id}.jpeg"
-        save_uploaded_image(uploaded_image, os.path.join('uploads', filename))
-        st.sidebar.success(f"Image uploaded and saved as {filename}")
-        
-        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
-
-    # Image history section
-    if 'image_history' not in st.session_state:
-        st.session_state.image_history = []
-
-    # Check if the image history is updated (if an image was uploaded)
-    if uploaded_image:
-        # Create image buffer to hold the uploaded image
-        img_buffer = io.BytesIO()
-        uploaded_image.save(img_buffer, format="JPEG")
-        img_buffer.seek(0)
-
-        # Generate a unique filename for the uploaded image
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        unique_id = uuid.uuid4().hex
-        filename = f"uploaded_image_{timestamp}_{unique_id}.jpeg"
-
-        # Add the image to the session state history
-        st.session_state.image_history.insert(0, {'image': img_buffer, 'filename': filename})
-        st.session_state.image_history = st.session_state.image_history[:10]  # Keep the latest 10 images
-
-    # Display and manage image history
-    if st.session_state.image_history:
-        current_image = st.session_state.image_history[0]['image']
-        current_image.seek(0)  # Reset the buffer to the start
-        st.image(current_image, use_column_width=True)
-
-        st.sidebar.divider()
-
-        # Save to 'outputs' folder and provide download link
-        if st.sidebar.button('Save Current Image to Folder'):
-            filename = st.session_state.image_history[0]['filename']
-            save_result = save_image(current_image, os.path.join('outputs', filename))
-            if "Error" in save_result:
-                st.sidebar.error(save_result)
+# Main logic after form submission
+if submitted:
+    if not api_key:
+        st.warning("⚠️ Please enter your API key in the sidebar to continue.")
+    else:
+        base64_image = None
+        if input_method == "Upload Image":
+            if not uploaded_file:
+                st.error("❌ Please upload an image file.")
             else:
-                st.sidebar.success(f"Image saved as {save_result}")
+                base64_image = image_file_to_base64(uploaded_file)
+        else:
+            base64_image = image_url_to_base64(image_url)
 
-        # Button to export all images
-        if st.sidebar.button('Export All Images'):
-            saved_files, export_folder = export_all_images(st.session_state.image_history)
-            if saved_files:
-                st.sidebar.success(f"All images exported to {export_folder}")
-            else:
-                st.sidebar.error("Error exporting images")
+        if base64_image:
+            url = "https://api.segmind.com/v1/kling-image2video"
+            payload = {
+                "image": base64_image,  # REQUIRED
+                "prompt": prompt,  # REQUIRED
+                "negative_prompt": negative_prompt,  # Optional but recommended
+                "cfg_scale": 0.5,  # Must be float between 0-1
+                "mode": "pro",  # Only "pro" or "std"
+                "duration": duration,  # Only 5 or 10
+                "version": version  # REQUIRED for Kling 1.6
+            }
 
-        st.sidebar.divider()
+            headers = {'x-api-key': api_key}
 
-if __name__ == "__main__":
-    main()
+            with st.spinner("🚀 Generating video..."):
+                try:
+                    response = requests.post(url, json=payload, headers=headers)
+
+                    if response.status_code == 401:
+                        error_msg = response.json().get("error", "Unauthorized access.")
+                        st.error(f"❌ Error: {error_msg}")
+                    elif response.status_code != 200:
+                        st.error(f"❌ Request failed with status {response.status_code}")
+                        st.text(response.content.decode())
+                    else:
+                        # Assuming the response contains the video URL or video data
+                        video_data = response.json()
+                        st.success("✅ Video generated successfully!")
+                        video_url = video_data.get("video_url")
+                        
+                        if video_url:
+                            st.video(video_url)
+                        else:
+                            st.error("❌ Video URL not found in response.")
+                except Exception as e:
+                    st.exception(f"❌ Unexpected error: {e}")
