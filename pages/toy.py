@@ -20,6 +20,8 @@ if "prompt_built" not in st.session_state:
     st.session_state.prompt_built = ""
 if "image_history" not in st.session_state:
     st.session_state.image_history = []
+if "reference_image" not in st.session_state:
+    st.session_state.reference_image = None
 
 # Main app introduction
 st.title("🎨 Custom 3D Toy Creator")
@@ -67,7 +69,15 @@ with st.sidebar.form("toy_creator_form"):
     visual_style = st.text_input("Visual style", value="cartoon, cute but still neat and clean, similar to Mattel toys")
     brand_logo = st.text_input("Brand/logo", value="Mattel logo")
 
-    # New feature: Image size selection
+    # Image uploader
+    reference_image = st.file_uploader(
+        "Upload reference image (optional)", 
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=False,
+        help="Upload an image for visual reference (max 200MB)"
+    )
+
+    # Image size selection
     image_size = st.selectbox(
         "Image Size",
         options=["512x512", "1024x1024"],
@@ -79,7 +89,7 @@ with st.sidebar.form("toy_creator_form"):
 
 # Function to build the prompt for image generation
 def build_prompt():
-    return (
+    base_prompt = (
         f"Create a picture of a 3D action figure toy displayed inside transparent plastic blister packaging. "
         f"The toy resembles {character_desc}, styled with a {expression}. "
         f"At the top of the packaging, write in large letters: “{name}”, and below it, add “{role}”. "
@@ -88,6 +98,11 @@ def build_prompt():
         f"The visual style is {visual_style}. "
         f"Add the {brand_logo} in the top corner of the packaging."
     )
+    
+    if reference_image:
+        base_prompt += f" Use this uploaded image as visual reference: [USER UPLOADED IMAGE]"
+    
+    return base_prompt
 
 # Function to generate an image using OpenAI's API
 def generate_image(prompt, api_key, size):
@@ -123,6 +138,9 @@ if submitted:
     if not st.session_state.api_key.strip():
         st.error("Please enter your OpenAI API key.")
     else:
+        # Save reference image to session state
+        st.session_state.reference_image = reference_image
+        
         # Build prompt based on user inputs
         st.session_state.prompt_built = build_prompt()
         
@@ -140,6 +158,11 @@ if submitted:
                     "prompt": st.session_state.prompt_built,
                     "size": image_size
                 })
+
+# Display reference image if uploaded
+if st.session_state.reference_image and not submitted:
+    st.subheader("📸 Uploaded Reference Image")
+    st.image(st.session_state.reference_image, use_column_width=True)
 
 # Display generated toy image (if available)
 if st.session_state.generated_image:
@@ -172,3 +195,6 @@ if len(st.session_state.image_history) > 0:
 if len(st.session_state.image_history) > 0:
     if st.button("🧹 Clear History"):
         del st.session_state.image_history[:]
+        st.session_state.generated_image = None
+        st.session_state.image_bytes = None
+        st.experimental_rerun()
