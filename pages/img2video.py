@@ -1,55 +1,91 @@
 import streamlit as st
 import requests
 import base64
+from PIL import Image
+import io
 
-# Convert an image file object to base64
-def image_file_to_base64(file):
-    image_data = file.read()
-    return base64.b64encode(image_data).decode('utf-8')
-
-# Sidebar input for API key
-st.sidebar.title("API Settings")
+# Sidebar for API key
+st.sidebar.title("🔑 API Settings")
 api_key = st.sidebar.text_input("Enter your API Key", type="password")
 
-# Initialize session state
-if "submitted" not in st.session_state:
-    st.session_state.submitted = False
+st.title("🎬 Kling Image-to-Video Generator")
 
-st.title("Kling Image-to-Video Generator")
+# Helpers
+def image_file_to_base64(uploaded_file):
+    image = Image.open(uploaded_file)
+    buffer = io.BytesIO()
+    save_format = image.format if image.format else "PNG"
+    image.save(buffer, format=save_format)
+    img_bytes = buffer.getvalue()
+    return base64.b64encode(img_bytes).decode('utf-8')
 
-# Streamlit form for user input
+def image_url_to_base64(image_url):
+    try:
+        response = requests.get(image_url)
+        response.raise_for_status()
+        return base64.b64encode(response.content).decode('utf-8')
+    except Exception as e:
+        st.error(f"Failed to fetch image from URL: {e}")
+        return None
+
+# User selects input method
+input_method = st.radio("Choose image input method:", ["Upload Image", "Image URL"])
+
+# Variables for image and prompt
+base64_image = None
+prompt = ""
+image_source = ""
+
+# Form for user inputs
 with st.form("kling_form"):
-    uploaded_file = st.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
+    if input_method == "Upload Image":
+        uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "webp"])
+        if uploaded_file:
+            st.image(Image.open(uploaded_file), caption="Uploaded Image", use_column_width=True)
+    else:
+        image_url = st.text_input("Image URL", "https://segmind-sd-models.s3.amazonaws.com/display_images/kling_ip.jpeg")
+
     prompt = st.text_input("Prompt", "Kitten riding in an aeroplane and looking out the window.")
-    submitted = st.form_submit_button("Generate")
+    negative_prompt = st.text_input("Negative Prompt", "No sudden movements, no fast zooms.")
+    duration = st.slider("Video Duration (seconds)", min_value=2, max_value=10, value=5)
+    submitted = st.form_submit_button("Generate Video")
 
-    if submitted and uploaded_file is not None:
-        st.session_state.submitted = True
-        st.session_state.uploaded_file = uploaded_file
-        st.session_state.prompt = prompt
+# Main logic after submission
+if submitted:
+    if not api_key:
+        st.warning("Please enter your API key in the sidebar to continue.")
+    else:
+        if input_method == "Upload Image":
+            if not uploaded_file:
+                st.error("Please upload an image file.")
+            else:
+                base64_image = image_file_to_base64(uploaded_file)
+                image_source = "upload"
+        else:
+            base64_image = image_url_to_base64(image_url)
+            image_source = "url"
 
-# Run only if form submitted and API key is provided
-if st.session_state.submitted and api_key:
-    url = "https://api.segmind.com/v1/kling-image2video"
+        if base64_image:
+            st.info(f"Using image from: {image_source}")
 
-    image_base64 = image_file_to_base64(st.session_state.uploaded_file)
+            url = "https://api.segmind.com/v1/kling-image2video"
+            data = {
+                "image": base64_image,
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "cfg_scale": 0.5,
+                "mode": "pro",
+                "duration": duration
+            }
 
-    data = {
-        "image": image_base64,
-        "prompt": st.session_state.prompt,
-        "negative_prompt": "No sudden movements, no fast zooms.",
-        "cfg_scale": 0.5,
-        "mode": "pro",
-        "duration": 5
-    }
+            headers = {'x-api-key': api_key}
 
-    headers = {'x-api-key': api_key}
-
-    with st.spinner("Generating video..."):
-        response = requests.post(url, json=data, headers=headers)
-
-    st.success("Response received:")
-    st.code(response.content)
-elif st.session_state.submitted and not api_key:
-    st.warning("Please enter your API key in the sidebar.")
-
+            with st.spinner("🚀 Generating video..."):
+                try:
+                    response = requests.post(url, json=data, headers=headers)
+                    response.raise_for_status()
+                    st.success("✅ Video generated successfully!")
+                    st.code(response.content.decode())
+                    # If you expect a URL or binary response, handle accordingly here
+                except Exception as e:
+                    st.error(f"❌ Generation failed: {e}")
