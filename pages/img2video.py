@@ -59,12 +59,14 @@ st.set_page_config(page_title="Image to Video", layout="centered")
 st.title("🖼️➡️🎥 Image to Video Generator (Enhanced Upload Handling)")
 st.markdown("Upload an image or paste a Dropbox/Google Drive image link to generate a video using the Segmind Kling API.")
 
+# File upload and URL input
 uploaded_file = st.file_uploader("📤 Upload a JPG/PNG image", type=["jpg", "jpeg", "png"])
 image_url = st.text_input("🌐 Or paste an image URL", placeholder="Dropbox or Google Drive share link")
 
 image_b64 = None
 display_url = None
 
+# Handling uploaded file or URL input
 if uploaded_file:
     st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
     image_b64 = uploaded_file_to_base64(uploaded_file)
@@ -81,6 +83,7 @@ api_key = st.text_input("🔐 API Key", type="password")
 prompt = st.text_area("📝 Prompt", "A futuristic flying car over a cyberpunk city at night.")
 negative_prompt = st.text_area("🚫 Negative Prompt", "Low resolution, distorted, blurry")
 
+# Generate video on button click
 if st.button("🚀 Generate Video"):
     if not image_b64:
         st.error("❌ Please upload an image or provide a valid image URL.")
@@ -122,12 +125,7 @@ with st.expander("🛠️ Debug Info"):
         st.markdown(f"**Original URL:** `{image_url}`")
         st.markdown(f"**Direct Link:** `{display_url}`")
     if image_b64:
-        # Show only the first 300 characters, and provide a download option for the full base64 string
+        # Show only the first 300 characters of the base64 string
         st.markdown("**Base64 Image Data (first 300 characters):**")
         st.code(image_b64[:300] + "...", language="text")
-        st.download_button(
-            label="⬇️ Download Full Base64",
-            data=image_b64,
-            file_name="image_base64.txt",
-            mime="text/plain"
-        )
+
