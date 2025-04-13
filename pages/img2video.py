@@ -25,16 +25,11 @@ def image_url_to_base64(image_url):
         response.raise_for_status()
         return base64.b64encode(response.content).decode('utf-8')
     except Exception as e:
-        st.error(f"Failed to fetch image from URL: {e}")
+        st.error(f"❌ Failed to fetch image from URL: {e}")
         return None
 
 # User selects input method
 input_method = st.radio("Choose image input method:", ["Upload Image", "Image URL"])
-
-# Variables for image and prompt
-base64_image = None
-prompt = ""
-image_source = ""
 
 # Form for user inputs
 with st.form("kling_form"):
@@ -53,21 +48,18 @@ with st.form("kling_form"):
 # Main logic after submission
 if submitted:
     if not api_key:
-        st.warning("Please enter your API key in the sidebar to continue.")
+        st.warning("⚠️ Please enter your API key in the sidebar to continue.")
     else:
+        base64_image = None
         if input_method == "Upload Image":
             if not uploaded_file:
-                st.error("Please upload an image file.")
+                st.error("❌ Please upload an image file.")
             else:
                 base64_image = image_file_to_base64(uploaded_file)
-                image_source = "upload"
         else:
             base64_image = image_url_to_base64(image_url)
-            image_source = "url"
 
         if base64_image:
-            st.info(f"Using image from: {image_source}")
-
             url = "https://api.segmind.com/v1/kling-image2video"
             data = {
                 "image": base64_image,
@@ -83,9 +75,16 @@ if submitted:
             with st.spinner("🚀 Generating video..."):
                 try:
                     response = requests.post(url, json=data, headers=headers)
-                    response.raise_for_status()
-                    st.success("✅ Video generated successfully!")
-                    st.code(response.content.decode())
-                    # If you expect a URL or binary response, handle accordingly here
+
+                    if response.status_code == 401:
+                        error_msg = response.json().get("error", "Unauthorized access.")
+                        st.error(f"❌ Error: {error_msg}")
+                    elif response.status_code != 200:
+                        st.error(f"❌ Request failed with status {response.status_code}")
+                        st.text(response.content.decode())
+                    else:
+                        st.success("✅ Video generated successfully!")
+                        st.code(response.content.decode())  # Replace with actual display logic if needed
+
                 except Exception as e:
-                    st.error(f"❌ Generation failed: {e}")
+                    st.exception(f"❌ Unexpected error: {e}")
