@@ -28,6 +28,8 @@ api_key = st.sidebar.text_input("Enter your API Key", type="password")
 # Debugging options in sidebar
 st.sidebar.title("🔧 Debug Options")
 debug_mode = st.sidebar.checkbox("Enable Debug Mode", value=False)
+# Initialize test_mode regardless of debug_mode setting
+test_mode = False
 if debug_mode:
     image_max_size = st.sidebar.slider("Max Image Dimension", 256, 2048, 1024, 128)
     image_quality = st.sidebar.slider("Image Quality", 50, 100, 85, 5)
@@ -160,18 +162,20 @@ with col2:
                         st.error("❌ Please enter an image URL.")
                         st.stop()
                 
-                # Resize image if debug mode is enabled
+                # Initialize variables for when debug mode is off
+                if not debug_mode:
+                    image_max_size = 1024
+                    image_quality = 85
+                
+                # Resize image
+                original_size = image.size
+                image = resize_image(image, max_size=image_max_size)
+                resized_size = image.size
+                
                 if debug_mode:
-                    original_size = image.size
-                    image = resize_image(image, max_size=image_max_size)
-                    resized_size = image.size
                     st.info(f"Image resized from {original_size} to {resized_size}")
-                else:
-                    # Always resize to a reasonable size to avoid API issues
-                    image = resize_image(image, max_size=1024)
                 
                 # Convert to base64
-                image_quality = image_quality if debug_mode else 85
                 base64_image = convert_image_to_base64(image, quality=image_quality)
                 
                 # Debug information
@@ -204,7 +208,7 @@ with col2:
                     st.json(payload_info)
                 
                 # Test mode or make actual API call
-                if test_mode and debug_mode:
+                if test_mode:
                     st.success("✅ Test Mode: API call skipped")
                     log_placeholder.info("In test mode, no API call was made")
                 else:
