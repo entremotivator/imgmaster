@@ -7,6 +7,12 @@ import tempfile
 import os
 import time
 import uuid
+import json
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Page config
 st.set_page_config(
@@ -15,62 +21,68 @@ st.set_page_config(
     layout="wide"
 )
 
-# Sidebar for API key
+# Sidebar for API key and debugging options
 st.sidebar.title("🔑 API Settings")
 api_key = st.sidebar.text_input("Enter your API Key", type="password")
+
+# Debugging options in sidebar
+st.sidebar.title("🔧 Debug Options")
+debug_mode = st.sidebar.checkbox("Enable Debug Mode", value=False)
+if debug_mode:
+    image_max_size = st.sidebar.slider("Max Image Dimension", 256, 2048, 1024, 128)
+    image_quality = st.sidebar.slider("Image Quality", 50, 100, 85, 5)
+    show_base64 = st.sidebar.checkbox("Show Base64 Preview", value=False)
+    test_mode = st.sidebar.checkbox("Test Mode (Skip API Call)", value=False)
 
 # App title and description
 st.title("🎬 Kling Image-to-Video Generator")
 st.markdown("Transform your images into motion videos with AI")
 
-# Create temp directory if it doesn't exist
-TEMP_DIR = os.path.join(tempfile.gettempdir(), "kling_app")
-os.makedirs(TEMP_DIR, exist_ok=True)
-
-# Function to clean up old temp files (older than 1 hour)
-def cleanup_temp_files():
-    current_time = time.time()
-    for filename in os.listdir(TEMP_DIR):
-        file_path = os.path.join(TEMP_DIR, filename)
-        if os.path.isfile(file_path) and current_time - os.path.getmtime(file_path) > 3600:
-            os.remove(file_path)
-
 # Helper functions
-def save_uploaded_file(uploaded_file):
-    """Save uploaded file to temp directory and return URL."""
-    # Create unique filename
-    file_extension = os.path.splitext(uploaded_file.name)[1]
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(TEMP_DIR, unique_filename)
+def resize_image(image, max_size=1024):
+    """Resize image while maintaining aspect ratio."""
+    width, height = image.size
+    if width > height:
+        if width > max_size:
+            new_width = max_size
+            new_height = int(height * (max_size / width))
+    else:
+        if height > max_size:
+            new_height = max_size
+            new_width = int(width * (max_size / height))
+        else:
+            return image  # No resize needed
     
-    # Save file
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    # Return a URL-like path that could be used in your application
-    # In a real app, this might be an actual URL to your server
-    return file_path
+    return image.resize((new_width, new_height), Image.LANCZOS)
 
-def image_file_to_base64(file_path):
-    """Convert image file to base64."""
-    with open(file_path, "rb") as f:
-        image_data = f.read()
-    return base64.b64encode(image_data).decode("utf-8")
+def convert_image_to_base64(image, format="JPEG", quality=85):
+    """Convert PIL Image to base64 string."""
+    buffer = io.BytesIO()
+    image.save(buffer, format=format, quality=quality)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-def image_url_to_base64(image_url):
-    """Fetch image from URL and convert to base64."""
+def fetch_image_from_url(url):
+    """Fetch image from URL and return PIL Image object."""
     try:
-        response = requests.get(image_url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
-        return base64.b64encode(response.content).decode("utf-8")
+        return Image.open(io.BytesIO(response.content))
     except Exception as e:
-        st.error(f"❌ Failed to fetch image from URL: {e}")
+        st.error(f"Failed to fetch image from URL: {e}")
         return None
 
-# Clean up old temp files on app start
-cleanup_temp_files()
+def validate_api_response(response):
+    """Validate API response and extract error details."""
+    if response.status_code != 200:
+        try:
+            error_data = response.json()
+            error_message = error_data.get("error", "Unknown error")
+            return False, f"API Error ({response.status_code}): {error_message}"
+        except:
+            return False, f"API Error ({response.status_code}): {response.text[:200]}"
+    return True, None
 
-# Main app layout
+# Layout
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -79,15 +91,18 @@ with col1:
     
     # Form inputs
     with st.form("kling_form"):
-        temp_file_path = None
-        image_url = None
+        # Image input
+        image_data = None
         
         if input_method == "Upload Image":
             uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "webp"])
             if uploaded_file:
-                # Save the uploaded file and get the path
-                temp_file_path = save_uploaded_file(uploaded_file)
-                st.image(Image.open(uploaded_file), caption="Uploaded Image", use_container_width=True)
+                try:
+                    image = Image.open(uploaded_file)
+                    st.image(image, caption="Uploaded Image", use_container_width=True)
+                    image_data = image
+                except Exception as e:
+                    st.error(f"Error opening image: {e}")
         else:
             image_url = st.text_input("Image URL", "https://segmind-sd-models.s3.amazonaws.com/display_images/kling_ip.jpeg")
             if image_url:
@@ -96,10 +111,12 @@ with col1:
                 except:
                     st.error("Unable to display image from URL. Please check if the URL is valid.")
         
+        # Video settings
         st.subheader("Video Generation Settings")
         prompt = st.text_area("Prompt", "Kitten riding in an aeroplane and looking out the window.")
         negative_prompt = st.text_area("Negative Prompt", "No sudden movements, no fast zooms.")
         
+        # Additional parameters
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             duration = st.slider("Video Duration (seconds)", min_value=5, max_value=10, value=5, step=5)
@@ -108,70 +125,151 @@ with col1:
         with col_c:
             cfg_scale = st.slider("CFG Scale", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
         
+        mode = st.selectbox("Processing Mode", ["pro", "standard"])
+        
         submitted = st.form_submit_button("🚀 Generate Video")
 
 with col2:
     st.subheader("Generated Video")
     video_placeholder = st.empty()
+    log_placeholder = st.empty()
     
     # Process submission
     if submitted:
-        if not api_key:
+        if not api_key and not test_mode:
             st.warning("⚠️ Please enter your API key in the sidebar.")
         else:
-            base64_image = None
-            if input_method == "Upload Image":
-                if temp_file_path:
-                    base64_image = image_file_to_base64(temp_file_path)
+            # Prepare the image
+            try:
+                # Process the image based on input method
+                if input_method == "Upload Image":
+                    if uploaded_file and image_data:
+                        # Use the already loaded image
+                        image = image_data
+                    else:
+                        st.error("❌ Please upload an image.")
+                        st.stop()
                 else:
-                    st.error("❌ Please upload an image.")
-            else:
-                if image_url:
-                    base64_image = image_url_to_base64(image_url)
+                    if image_url:
+                        image = fetch_image_from_url(image_url)
+                        if image is None:
+                            st.error("❌ Failed to fetch image from URL.")
+                            st.stop()
+                    else:
+                        st.error("❌ Please enter an image URL.")
+                        st.stop()
+                
+                # Resize image if debug mode is enabled
+                if debug_mode:
+                    original_size = image.size
+                    image = resize_image(image, max_size=image_max_size)
+                    resized_size = image.size
+                    st.info(f"Image resized from {original_size} to {resized_size}")
                 else:
-                    st.error("❌ Please enter an image URL.")
-            
-            if base64_image:
+                    # Always resize to a reasonable size to avoid API issues
+                    image = resize_image(image, max_size=1024)
+                
+                # Convert to base64
+                image_quality = image_quality if debug_mode else 85
+                base64_image = convert_image_to_base64(image, quality=image_quality)
+                
+                # Debug information
+                if debug_mode:
+                    log_placeholder.info(f"Image converted to base64 (length: {len(base64_image)} characters)")
+                    if show_base64:
+                        st.text_area("Base64 Preview", value=base64_image[:100] + "...", height=100)
+                
+                # Prepare API request
                 url = "https://api.segmind.com/v1/kling-image2video"
                 payload = {
                     "image": base64_image,
                     "prompt": prompt,
                     "negative_prompt": negative_prompt,
-                    "cfg_scale": cfg_scale,
-                    "mode": "pro",
-                    "duration": duration,
+                    "cfg_scale": float(cfg_scale),
+                    "mode": mode,
+                    "duration": int(duration),
                     "version": version
                 }
                 headers = {"x-api-key": api_key}
                 
-                with st.spinner("🚀 Generating video... This may take a minute."):
-                    try:
-                        response = requests.post(url, json=payload, headers=headers)
-                        if response.status_code == 401:
-                            error_msg = response.json().get("error", "Unauthorized access.")
-                            st.error(f"❌ Error: {error_msg}")
-                        elif response.status_code != 200:
-                            st.error(f"❌ Request failed: {response.status_code}")
-                            st.text(response.content.decode())
-                        else:
-                            video_data = response.json()
-                            video_url = video_data.get("video_url")
-                            if video_url:
-                                st.success("✅ Video generated successfully!")
-                                with video_placeholder:
-                                    st.video(video_url)
+                # Debug payload
+                if debug_mode:
+                    payload_info = {k: v if k != "image" else f"[BASE64 string, length: {len(v)}]" for k, v in payload.items()}
+                    st.json(payload_info)
+                
+                # Test mode or make actual API call
+                if test_mode and debug_mode:
+                    st.success("✅ Test Mode: API call skipped")
+                    log_placeholder.info("In test mode, no API call was made")
+                else:
+                    with st.spinner("🚀 Generating video... This may take a minute."):
+                        try:
+                            log_placeholder.info("Sending request to Kling API...")
+                            response = requests.post(url, json=payload, headers=headers, timeout=300)
+                            
+                            # Validate response
+                            success, error_message = validate_api_response(response)
+                            
+                            if not success:
+                                st.error(error_message)
                                 
-                                # Save video data
-                                st.download_button(
-                                    label="📥 Download Video",
-                                    data=requests.get(video_url).content,
-                                    file_name=f"kling_video_{int(time.time())}.mp4",
-                                    mime="video/mp4"
-                                )
+                                # More detailed error information for debugging
+                                if debug_mode:
+                                    st.write("Response Headers:", dict(response.headers))
+                                    try:
+                                        st.json(response.json())
+                                    except:
+                                        st.text(response.text)
                             else:
-                                st.error("❌ Video URL not found in response.")
-                    except Exception as e:
-                        st.exception(f"❌ Unexpected error: {e}")
+                                video_data = response.json()
+                                video_url = video_data.get("video_url")
+                                
+                                if video_url:
+                                    st.success("✅ Video generated successfully!")
+                                    with video_placeholder:
+                                        st.video(video_url)
+                                    
+                                    # Save video data
+                                    video_bytes = requests.get(video_url).content
+                                    st.download_button(
+                                        label="📥 Download Video",
+                                        data=video_bytes,
+                                        file_name=f"kling_video_{int(time.time())}.mp4",
+                                        mime="video/mp4"
+                                    )
+                                    
+                                    # More response details in debug mode
+                                    if debug_mode:
+                                        st.json(video_data)
+                                else:
+                                    st.error("❌ Video URL not found in response.")
+                                    if debug_mode:
+                                        st.json(video_data)
+                                        
+                        except requests.exceptions.Timeout:
+                            st.error("❌ Request timed out. The API server might be busy.")
+                        except requests.exceptions.ConnectionError:
+                            st.error("❌ Connection error. Please check your internet connection.")
+                        except Exception as e:
+                            st.error(f"❌ Unexpected error: {type(e).__name__}: {e}")
+                            if debug_mode:
+                                st.exception(e)
+                
+            except Exception as e:
+                st.error(f"❌ Error processing image: {type(e).__name__}: {e}")
+                if debug_mode:
+                    st.exception(e)
+
+# Add a debugging section if debug mode is enabled
+if debug_mode:
+    st.subheader("🐞 Debug Information")
+    if st.button("Test Connection to Kling API"):
+        try:
+            response = requests.get("https://api.segmind.com/v1/health", timeout=5)
+            st.write("Status Code:", response.status_code)
+            st.write("Response:", response.text)
+        except Exception as e:
+            st.error(f"Connection test failed: {e}")
 
 # Footer
 st.markdown("---")
