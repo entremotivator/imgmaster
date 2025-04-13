@@ -1,12 +1,11 @@
 import streamlit as st
 import requests
 import base64
+from PIL import Image  # Add this import
 
 # Image conversion functions
-def image_file_to_base64(image_path):
-    with open(image_path, 'rb') as f:
-        image_data = f.read()
-    return base64.b64encode(image_data).decode('utf-8')
+def image_file_to_base64(image_file):
+    return base64.b64encode(image_file.read()).decode('utf-8')
 
 def image_url_to_base64(image_url):
     response = requests.get(image_url)
@@ -24,12 +23,11 @@ uploaded_file = st.file_uploader("Upload local image (or use URL below)",
 image_url = st.text_input("Or enter image URL:", 
                          "https://segmind-sd-models.s3.amazonaws.com/display_images/kling_ip.jpeg")
 
-# Image display
+# Image display and base64 conversion
+image_b64 = None
 if uploaded_file:
     st.image(uploaded_file, caption='Uploaded Image')
-    image_b64 = image_file_to_base64(uploaded_file.name)
-    with open(uploaded_file.name, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+    image_b64 = image_file_to_base64(uploaded_file)  # Use file object directly
 elif image_url:
     try:
         st.image(image_url, caption='URL Image')
@@ -45,7 +43,7 @@ negative_prompt = st.text_input("Negative Prompt",
                                "No sudden movements, no fast zooms.")
 
 # API request
-if st.button("Generate Video"):
+if st.button("Generate Video") and image_b64:
     if api_key == "YOUR_API_KEY":
         st.error("Please enter a valid API key")
     else:
