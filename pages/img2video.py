@@ -4,101 +4,119 @@ import base64
 import logging
 from requests.exceptions import RequestException
 
-# Enable debug logging for requests
+# Configure logging
 logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-# Convert image file to base64
+# Image conversion functions
+def validate_base64(image_base64):
+    try:
+        base64.b64decode(image_base64, validate=True)
+        return True
+    except Exception as e:
+        logger.error(f"Base64 validation failed: {str(e)}")
+        return False
+
 def image_file_to_base64(file):
     try:
         image_data = file.read()
-        return base64.b64encode(image_data).decode('utf-8')
+        encoded = base64.b64encode(image_data).decode('utf-8')
+        if not validate_base64(encoded):
+            st.error("Invalid image encoding detected")
+            return None
+        return encoded
     except Exception as e:
         st.error(f"Image processing error: {str(e)}")
         return None
 
-# Convert image URL to base64
 def image_url_to_base64(image_url):
     try:
         response = requests.get(image_url, timeout=10)
         response.raise_for_status()
-        return base64.b64encode(response.content).decode('utf-8')
+        encoded = base64.b64encode(response.content).decode('utf-8')
+        if not validate_base64(encoded):
+            st.error("Invalid image encoding from URL")
+            return None
+        return encoded
     except RequestException as e:
         st.error(f"Image download failed: {str(e)}")
         return None
 
 # Streamlit app configuration
-st.set_page_config(page_title="Segmind Image2Video", layout="centered")
-st.title("🎥 Segmind Kling 1.6 Image2Video")
-st.markdown("Convert images to AI-generated videos using **Segmind's Kling 1.6** model.")
+st.set_page_config(page_title="Segmind Video Generator", layout="centered")
+st.title("🎥 AI Video Generation")
+st.markdown("Convert images to videos using Segmind's Kling 1.6 model")
 
 # API configuration
 API_ENDPOINTS = [
     "https://api.segmind.com/v1/kling-image2video",
-    "https://api.segmind.com/v1/kling-1.6-image2video",
+    "https://api.segmind.com/v1/kling-1.6-image2video"
 ]
 
 # API key input
-api_key = st.text_input("🔑 Enter your Segmind API Key", type="password", help="Get your API key from Segmind's dashboard")
+api_key = st.text_input("🔑 Segmind API Key", type="password", 
+                       help="Get your key from Segmind's dashboard")
 
 # Image input section
 st.subheader("🖼️ Image Input")
-image_source = st.radio("Choose Image Source", ["Image URL", "Upload File"], horizontal=True)
-image_base64 = None
+image_source = st.radio("Source", ["URL", "Upload"], horizontal=True, label_visibility="collapsed")
 
-if image_source == "Image URL":
-    image_url = st.text_input("Image URL *", placeholder="https://example.com/image.jpg")
-    if st.button("Preview URL Image") and image_url:
-        try:
-            st.image(image_url, caption="Image Preview", use_container_width=True)
-        except Exception as e:
-            st.error(f"Preview error: {str(e)}")
+image_base64 = None
+if image_source == "URL":
+    image_url = st.text_input("Image URL", placeholder="https://example.com/image.jpg")
     if image_url:
+        if st.button("Preview Image"):
+            try:
+                st.image(image_url, use_container_width=True)
+            except Exception as e:
+                st.error(f"Preview error: {str(e)}")
         image_base64 = image_url_to_base64(image_url)
 else:
-    uploaded_file = st.file_uploader("Upload an image *", type=["png", "jpg", "jpeg"], 
-                                   help="Max 5MB recommended for best performance")
+    uploaded_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
     if uploaded_file:
-        if uploaded_file.size > 5 * 1024 * 1024:  # 5MB limit
-            st.warning("Large images may cause API timeouts. Consider resizing to under 5MB.")
+        if uploaded_file.size > 5 * 1024 * 1024:
+            st.warning("For best results, use images under 5MB")
         image_base64 = image_file_to_base64(uploaded_file)
         if image_base64:
-            st.image(uploaded_file, caption="Uploaded Image Preview", use_container_width=True)
+            st.image(uploaded_file, use_container_width=True)
 
-# Animation settings
-st.subheader("✏️ Animation Settings")
+# Generation parameters
+st.subheader("⚙️ Animation Settings")
+
 col1, col2 = st.columns(2)
 with col1:
-    prompt = st.text_area("Prompt", value="group of people talking in an office", 
-                         help="Be specific about motion directions (e.g., 'left to right pan')")
+    prompt = st.text_area("Prompt", "A cat walking slowly", 
+                         help="Describe the desired motion precisely")
 with col2:
-    negative_prompt = st.text_area("Negative Prompt", value="No sudden movements, no fast zooms",
-                                  help="Specify unwanted elements (e.g., 'blurry areas, distorted faces')")
+    negative_prompt = st.text_area("Negative Prompt", 
+                                  "blurry, distorted, sudden movements",
+                                  help="Elements to avoid in the animation")
 
-st.subheader("⚙️ Advanced Settings")
 col1, col2, col3 = st.columns(3)
 with col1:
-    cfg_scale = st.slider("CFG Scale", 0.0, 1.0, 0.5, 0.1,
-                         help="Prompt adherence strength (0=creative, 1=strict)")
+    cfg_scale = st.slider("Guidance Strength", 0.0, 1.0, 0.5, 0.1,
+                         help="0 = Creative, 1 = Strict prompt following")
 with col2:
-    mode = st.selectbox("Quality Mode", options=["pro", "std"], index=0,
-                       help="Pro: High quality, Std: Standard quality")
+    mode = st.selectbox("Quality", ["pro", "std"], index=0,
+                       help="Pro: High quality, Std: Standard")
 with col3:
-    duration = st.selectbox("Duration", options=[5, 10], index=0,
+    duration = st.selectbox("Duration", [5, 10], index=0,
                            format_func=lambda x: f"{x} seconds")
 
 # Video generation
 if st.button("🎬 Generate Video", type="primary", use_container_width=True):
     if not api_key:
-        st.error("API Key is required")
+        st.error("API key is required")
     elif not image_base64:
         st.error("Please provide a valid image")
     else:
-        with st.spinner("Generating video - this may take 1-2 minutes..."):
+        with st.spinner("Generating video..."):
+            # Prepare request
             headers = {
                 "x-api-key": api_key,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "User-Agent": "Segmind-Streamlit/1.0"
+                "User-Agent": "Segmind-Streamlit/1.2"
             }
             
             payload = {
@@ -107,133 +125,104 @@ if st.button("🎬 Generate Video", type="primary", use_container_width=True):
                 "negative_prompt": negative_prompt,
                 "cfg_scale": cfg_scale,
                 "mode": mode,
-                "duration": int(duration),
-                "version": "1.6"  # Explicit version parameter
+                "duration": duration,
+                "version": "1.6"
             }
 
-            try:
-                response = requests.post(
-                    API_ENDPOINTS[0],  # Use primary endpoint
-                    json=payload,
-                    headers=headers,
-                    timeout=(10, 120)  # Connect timeout 10s, read timeout 120s
-                )
+            # Log payload for debugging
+            logger.info(f"Sending payload: { {k: (v[:100] + '...' if isinstance(v, str) and len(v) > 100 else v) for k, v in payload.items()} }")
 
-                if response.status_code == 200:
-                    st.success("✅ Video generated successfully!")
-                    try:
-                        video_data = response.content
-                        
-                        # Display video
-                        with st.container():
-                            st.video(video_data, format="video/mp4")
-                            
-                            # Download section
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.download_button(
-                                    "Download MP4",
-                                    video_data,
-                                    file_name="generated_video.mp4",
-                                    mime="video/mp4"
-                                )
-                            with col2:
-                                if st.button("Generate Another"):
-                                    st.rerun()
-                    
-                    except Exception as e:
-                        st.error(f"Video rendering error: {str(e)}")
-                        st.code(f"Response headers: {dict(response.headers)}", language='text')
-                
-                else:
-                    error_details = {
-                        "status": response.status_code,
-                        "headers": dict(response.headers),
-                        "response": response.text[:1000]
-                    }
-                    
-                    st.error(f"❌ Generation failed (HTTP {response.status_code})")
-                    
-                    with st.expander("Diagnostic Information"):
-                        st.json({
-                            "endpoint": API_ENDPOINTS[0],
-                            "payload_keys": list(payload.keys()),
-                            "image_size": f"{len(image_base64)//1024}KB",
-                            "error_details": error_details
-                        })
-                    
-                    if response.status_code == 401:
-                        st.warning("Check your API key validity and permissions")
-                    elif response.status_code == 406:
-                        st.warning("Invalid parameters - ensure duration is 5/10s and mode is pro/std")
-                    elif response.status_code == 413:
-                        st.warning("Image too large - try resizing below 5MB")
-                    elif response.status_code >= 500:
-                        st.info("Server error - try again later or contact Segmind support")
-
-            except RequestException as e:
-                st.error(f"Network error: {str(e)}")
-                st.progress(0, text="Retrying with alternative endpoint...")
-                
-                # Fallback to secondary endpoint
+            # Try endpoints sequentially
+            response = None
+            for endpoint in API_ENDPOINTS:
                 try:
                     response = requests.post(
-                        API_ENDPOINTS[1],
+                        endpoint,
                         json=payload,
                         headers=headers,
-                        timeout=120
+                        timeout=(10, 120)  # 10s connect, 120s read
                     )
                     if response.status_code == 200:
-                        st.success("✅ Success on fallback endpoint!")
-                        st.video(response.content)
-                    else:
-                        st.error(f"Fallback failed (HTTP {response.status_code})")
+                        break
                 except RequestException as e:
-                    st.error(f"Critical failure: {str(e)}")
+                    logger.error(f"Endpoint {endpoint} failed: {str(e)}")
+                    continue
 
-# Monitoring section
-with st.expander("API Health Monitoring"):
-    if 'request_history' not in st.session_state:
-        st.session_state.request_history = []
-    
-    if st.button("Test API Connection"):
+            # Handle response
+            if response and response.status_code == 200:
+                st.success("Video generated successfully!")
+                st.video(response.content)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        "Download MP4",
+                        response.content,
+                        file_name="generated_video.mp4",
+                        mime="video/mp4"
+                    )
+                with col2:
+                    if st.button("Generate Another"):
+                        st.rerun()
+            
+            else:
+                error_details = {
+                    "status": response.status_code if response else "No response",
+                    "headers": dict(response.headers) if response else None,
+                    "response": response.text if response else "Request failed"
+                }
+                
+                st.error(f"Generation failed (Code: {error_details['status']})")
+                
+                with st.expander("Diagnostic Details"):
+                    st.json({
+                        "endpoint": API_ENDPOINTS[0],
+                        "payload_keys": list(payload.keys()),
+                        "image_size": f"{len(image_base64)//1024}KB",
+                        "error_details": error_details
+                    })
+
+                # Specific error guidance
+                if response and response.status_code == 400:
+                    st.warning("""
+                    Common 400 Error Fixes:
+                    1. Verify image encoding (must be valid base64)
+                    2. Ensure prompt doesn't contain special characters
+                    3. Check API documentation for parameter requirements
+                    """)
+                elif response and response.status_code == 406:
+                    st.warning("Ensure duration is 5/10s and mode is pro/std")
+                elif response and response.status_code == 413:
+                    st.warning("Image too large - try resizing below 5MB")
+
+# Debugging section
+with st.expander("🔧 API Diagnostics"):
+    if st.button("Test Connection"):
         test_payload = {
-            "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",  # 1px transparent PNG
+            "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",  # 1px image
             "prompt": "test",
             "duration": 5,
             "mode": "std"
         }
         
-        with st.spinner("Testing connectivity..."):
-            try:
-                test_response = requests.post(
-                    API_ENDPOINTS[0],
-                    json=test_payload,
-                    headers={"x-api-key": api_key},
-                    timeout=10
-                )
-                st.session_state.request_history.append({
-                    "timestamp": st._get_report_ctx().request.utcnow.isoformat(),
-                    "status": test_response.status_code,
-                    "latency": test_response.elapsed.total_seconds()
-                })
-                
-                st.metric("Last Test", 
-                         f"HTTP {test_response.status_code}", 
-                         f"{test_response.elapsed.total_seconds():.2f}s latency")
-            
-            except Exception as e:
-                st.error(f"Connection test failed: {str(e)}")
-    
-    if st.session_state.request_history:
-        st.write("Recent Requests:")
-        st.dataframe(st.session_state.request_history[-5:])
+        try:
+            test_response = requests.post(
+                API_ENDPOINTS[0],
+                json=test_payload,
+                headers={"x-api-key": api_key},
+                timeout=10
+            )
+            st.metric("Test Result", 
+                     f"HTTP {test_response.status_code}",
+                     f"{test_response.elapsed.total_seconds():.2f}s")
+        except Exception as e:
+            st.error(f"Connection test failed: {str(e)}")
 
 # Footer
 st.markdown("---")
 st.caption("""
-**Troubleshooting Tips**  
-1. For 406 errors: Ensure duration is 5/10s and mode is pro/std  
-2. For slow responses: Use 'std' mode with 5s duration  
-3. For quality issues: Use 'pro' mode with detailed motion prompts  
+**Troubleshooting Guide**  
+1. For 400 errors: Check image encoding and prompt content  
+2. For slow responses: Use 5s duration and 'std' mode  
+3. For quality issues: Use detailed prompts with motion directions  
 """)
