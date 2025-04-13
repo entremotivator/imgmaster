@@ -1,85 +1,49 @@
 import streamlit as st
-import requests
-import base64
+import page  # Pulls additional content from /page.py
 
-# Convert image file to base64
-def image_file_to_base64(file):
-    image_data = file.read()
-    return base64.b64encode(image_data).decode('utf-8')
+st.set_page_config(page_title="Mega Content Suite", layout="wide")
 
-# Convert image URL to base64
-def image_url_to_base64(image_url):
-    response = requests.get(image_url)
-    if response.status_code == 200:
-        return base64.b64encode(response.content).decode('utf-8')
-    else:
-        raise Exception(f"Failed to fetch image: {response.status_code}")
+st.title("🎬 Mega Content Suite")
+st.markdown("### The Ultimate Creator's Toolkit — Powered by AI ⚡")
 
-# Streamlit app
-st.set_page_config(page_title="Segmind Image2Video", layout="centered")
-st.title("🎥 Segmind Kling 1.6 Image2Video")
-st.markdown("Convert a single image to an AI-generated animated video using **Segmind's Kling 1.6** model.")
+st.markdown("""
+Welcome to **Mega Content Suite** – your all-in-one creative studio. Whether you're a content creator, marketer, or entrepreneur, we've got the tools to turn your ideas into 🔥 multimedia masterpieces.
 
-# API key input
-api_key = st.text_input("🔑 Enter your Segmind API Key", type="password")
+---
 
-# Image input
-st.subheader("🖼️ Image Input")
-image_source = st.radio("Choose Image Source", ["Image URL", "Upload File"])
-image_base64 = None
+### 🚀 Key Features
 
-if image_source == "Image URL":
-    image_url = st.text_input("Image URL *")
-    if image_url:
-        try:
-            image_base64 = image_url_to_base64(image_url)
-            st.image(image_url, caption="Image Preview")
-        except Exception as e:
-            st.error(str(e))
+- 📝 **Text-to-Video Generator**  
+  Convert written scripts into stunning video content in seconds.
+
+- 🖼️ **Image-to-Video Animator**  
+  Transform static images into animated scenes with dynamic transitions.
+
+- 🎙️ **Voiceover Integration**  
+  Add realistic AI voiceovers to your content.
+
+- 🧠 **Smart Script Assistant**  
+  Get script suggestions, taglines, or ad copy with a single prompt.
+
+- 🎨 **Content Templates**  
+  Access ready-made templates for reels, ads, intros, and more.
+
+- 🧰 **Drag-and-Drop Editor** *(Coming Soon)*  
+  A fully interactive timeline editor for polishing your content.
+
+- 📤 **One-Click Export**  
+  Download or share content directly to social platforms.
+
+---
+
+""")
+
+st.subheader("🔄 Dynamic Content from `/page`")
+if hasattr(page, "render"):
+    page.render()
 else:
-    uploaded_file = st.file_uploader("Upload an image *", type=["png", "jpg", "jpeg"])
-    if uploaded_file:
-        image_base64 = image_file_to_base64(uploaded_file)
-        st.image(uploaded_file, caption="Image Preview")
+    st.warning("`page.py` is missing a `render()` function.")
 
-# Prompt fields
-st.subheader("✏️ Animation Prompt")
-prompt = st.text_input("Prompt", value="group of people talking to each other in an office setting")
-negative_prompt = st.text_input("Negative Prompt", value="No sudden movements, no fast zooms.")
+st.divider()
+st.markdown("✨ Let the Mega Content Suite turn your vision into viral-ready videos!")
 
-# Configuration fields
-st.subheader("⚙️ Animation Settings")
-
-cfg_scale = st.slider("CFG Scale (0-1)", min_value=0.0, max_value=1.0, value=0.5, step=0.1)
-
-mode = st.selectbox("Mode", options=["pro", "standard", "fast"], index=0)
-
-duration = st.selectbox("Duration (seconds)", options=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], index=4)
-
-# Submit button
-if st.button("🎬 Generate Video"):
-    if not api_key:
-        st.error("API Key is required.")
-    elif not image_base64:
-        st.error("An image is required.")
-    else:
-        with st.spinner("Sending request to Segmind API..."):
-            url = "https://api.segmind.com/v1/kling-1.6-image2video"
-            headers = {"x-api-key": api_key}
-            payload = {
-                "image": image_base64,
-                "prompt": prompt,
-                "negative_prompt": negative_prompt,
-                "cfg_scale": cfg_scale,
-                "mode": mode,
-                "duration": int(duration)
-            }
-
-            response = requests.post(url, json=payload, headers=headers)
-
-        if response.status_code == 200:
-            st.success("✅ Video generated successfully!")
-            video_bytes = response.content
-            st.video(video_bytes)
-        else:
-            st.error(f"❌ Failed to generate video ({response.status_code}): {response.text}")
