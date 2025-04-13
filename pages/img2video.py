@@ -1,105 +1,126 @@
 import streamlit as st
 import requests
+from PIL import Image
 import base64
 import io
-from PIL import Image
 import re
-import warnings
 
-# Suppress image warnings
-warnings.filterwarnings("ignore", category=UserWarning, module='PIL.*')
+# ---------- Background Removal Integration ----------
+class BackgroundRemoval:
+    def __init__(self, api_key):
+        self.url = "https://api.segmind.com/v1/bg-removal"
+        self.headers = {"x-api-key": api_key}
 
-# Convert uploaded file to base64
-def image_file_to_base64(uploaded_file):
+    def remove(self, image_url):
+        payload = {"method": "object", "imageUrl": image_url}
+        response = requests.post(self.url, json=payload, headers=self.headers)
+        if response.status_code == 200:
+            st.info(f"🧮 Remaining Credits: {response.headers.get('X-remaining-credits', 'N/A')}")
+            return Image.open(io.BytesIO(response.content))
+        else:
+            raise Exception(f"Background removal failed: {response.status_code} - {response.text}")
+
+# ---------- Base64 Helpers ----------
+def image_to_base64(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=95)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+def uploaded_file_to_base64(uploaded_file) -> str:
     try:
-        img = Image.open(uploaded_file)
-        if img.mode in ('P', 'PA'):
-            img = img.convert('RGBA' if 'transparency' in img.info else 'RGB')
-        if img.mode == 'RGBA':
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            background.paste(img, mask=img.split()[-1])
-            img = background
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=95)
-        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+        image = Image.open(uploaded_file)
+        if image.mode in ('P', 'PA'):
+            image = image.convert('RGBA' if 'transparency' in image.info else 'RGB')
+        if image.mode == 'RGBA':
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[-1])
+            image = background
+        return image_to_base64(image)
     except Exception as e:
-        st.error(f"Error processing uploaded image: {e}")
+        st.error(f"❌ Error processing uploaded file: {e}")
         return None
 
-# Convert Dropbox or Google Drive URL to direct link
-def convert_to_direct_link(url):
+# ---------- URL Handling ----------
+def convert_to_direct_link(url: str) -> str:
     if "dropbox.com" in url:
-        # Convert Dropbox to direct link
-        if "?dl=0" in url:
-            url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
-        elif "?dl=1" not in url:
-            url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com") + "?dl=1"
+        url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
     elif "drive.google.com" in url:
-        # Convert Google Drive share link to direct download link
         match = re.search(r"/d/([^/]+)", url)
         if match:
             file_id = match.group(1)
             url = f"https://drive.google.com/uc?export=download&id={file_id}"
         else:
-            match_alt = re.search(r"id=([^&]+)", url)
-            if match_alt:
-                file_id = match_alt.group(1)
+            alt = re.search(r"id=([^&]+)", url)
+            if alt:
+                file_id = alt.group(1)
                 url = f"https://drive.google.com/uc?export=download&id={file_id}"
     return url
 
-# Fetch image from URL and convert to base64
-def image_url_to_base64(image_url):
+def fetch_image_base64_from_url(image_url: str) -> str:
     try:
         response = requests.get(image_url)
         response.raise_for_status()
-        content_type = response.headers.get('Content-Type', '')
-        if 'image' not in content_type:
-            raise ValueError("URL does not point to a valid image.")
-        return base64.b64encode(response.content).decode("utf-8")
+        if "image" not in response.headers.get("Content-Type", ""):
+            raise ValueError("URL does not point to an image.")
+        image = Image.open(io.BytesIO(response.content))
+        return image_to_base64(image)
     except Exception as e:
-        st.error(f"Error downloading image from URL: {e}")
+        st.error(f"❌ Error fetching image from URL: {e}")
         return None
 
-# Streamlit UI
-st.set_page_config(page_title="Image to Video Generator", layout="centered")
-st.title("🖼️➡️🎥 Generate Video from Image")
-st.markdown("Upload an image or paste an image URL (Dropbox & Google Drive supported) to create a video using the Segmind Kling API.")
+# ---------- UI Setup ----------
+st.set_page_config(page_title="🖼️➡️🎥 Image to Video Generator", layout="centered")
+st.title("🖼️➡️🎥 Image to Video Generator (w/ Optional BG Removal)")
+st.markdown("Upload or paste a Dropbox/Google Drive link to convert an image to a **5-second video** using the Segmind Kling API.")
 
-# Upload or URL input
-uploaded_file = st.file_uploader("📤 Upload a JPG/PNG image", type=["jpg", "jpeg", "png"])
-image_url = st.text_input(
-    "🌐 Or paste a direct image URL (Dropbox / Google Drive supported)",
-    placeholder="https://drive.google.com/file/d/FILE_ID/view?usp=sharing",
-    help="URL must point directly to an image (.jpg/.jpeg/.png). For Dropbox, make sure it ends with '?dl=0'."
-)
+# ---------- Input Section ----------
+st.header("📥 Upload Image")
+uploaded_file = st.file_uploader("Upload JPG/PNG", type=["jpg", "jpeg", "png"])
+image_url = st.text_input("Or paste an image URL", placeholder="Dropbox or Google Drive share link")
+apply_bg_removal = st.checkbox("🧼 Remove background before generating video")
 
 image_b64 = None
-image_preview_url = None
+display_url = None
+processed_image = None
 
 if uploaded_file:
     st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
-    image_b64 = image_file_to_base64(uploaded_file)
+    processed_image = Image.open(uploaded_file)
 elif image_url:
     direct_url = convert_to_direct_link(image_url)
+    display_url = direct_url
     st.image(direct_url, caption="Image from URL", use_container_width=True)
-    image_b64 = image_url_to_base64(direct_url)
-    image_preview_url = direct_url
+    try:
+        response = requests.get(direct_url)
+        response.raise_for_status()
+        processed_image = Image.open(io.BytesIO(response.content))
+    except Exception as e:
+        st.error(f"❌ Failed to load image from URL: {e}")
 
-# Prompt fields
+# ---------- Prompt & API ----------
 st.divider()
-st.subheader("🎯 Prompt Settings")
+st.header("⚙️ Prompt Settings")
 api_key = st.text_input("🔐 API Key", type="password")
 prompt = st.text_area("📝 Prompt", "A futuristic flying car over a cyberpunk city at night.")
 negative_prompt = st.text_area("🚫 Negative Prompt", "Low resolution, distorted, blurry")
 
-# Submit button
+# ---------- Generate Video ----------
 if st.button("🚀 Generate Video"):
-    if not image_b64:
-        st.error("❌ Please provide a valid image first.")
-    elif not api_key or api_key == "YOUR_API_KEY":
-        st.error("❌ Please enter a valid API key.")
+    if not processed_image:
+        st.error("❌ Please upload or link to an image first.")
+    elif not api_key:
+        st.error("❌ API key is required.")
     else:
-        with st.spinner("Processing image and generating video..."):
+        try:
+            if apply_bg_removal:
+                with st.spinner("Removing background..."):
+                    remover = BackgroundRemoval(api_key)
+                    processed_image = remover.remove(display_url if image_url else None)
+                    st.image(processed_image, caption="Image after BG Removal", use_container_width=True)
+
+            image_b64 = image_to_base64(processed_image)
+
+            st.info("🔄 Generating 5-second video...")
             payload = {
                 "image": image_b64,
                 "prompt": prompt,
@@ -108,30 +129,32 @@ if st.button("🚀 Generate Video"):
                 "mode": "pro",
                 "duration": 5
             }
-            try:
-                response = requests.post(
-                    "https://api.segmind.com/v1/kling-image2video",
-                    json=payload,
-                    headers={"x-api-key": api_key},
-                    timeout=600
-                )
-                if response.status_code == 200:
-                    st.success("✅ Video generated successfully!")
-                    st.download_button(
-                        label="⬇️ Download Video",
-                        data=response.content,
-                        file_name="generated_video.mp4",
-                        mime="video/mp4"
-                    )
-                else:
-                    st.error(f"❌ API returned an error: {response.status_code} - {response.text}")
-            except Exception as e:
-                st.error(f"❌ Failed to generate video: {str(e)}")
 
-# Debug info
-with st.expander("🧪 Debug Info"):
+            res = requests.post(
+                "https://api.segmind.com/v1/kling-image2video",
+                json=payload,
+                headers={"x-api-key": api_key},
+                timeout=600
+            )
+
+            if res.status_code == 200:
+                st.success("✅ Video generated successfully!")
+                st.video(io.BytesIO(res.content))
+                st.download_button(
+                    label="⬇️ Download MP4",
+                    data=res.content,
+                    file_name="generated_video.mp4",
+                    mime="video/mp4"
+                )
+            else:
+                st.error(f"❌ API Error: {res.status_code} - {res.text}")
+        except Exception as e:
+            st.error(f"❌ Exception: {e}")
+
+# ---------- Debug Info ----------
+with st.expander("🛠️ Debug Info"):
     if image_url:
         st.markdown(f"**Original URL:** `{image_url}`")
-        st.markdown(f"**Processed Direct Link:** `{image_preview_url}`")
+        st.markdown(f"**Direct Link:** `{display_url}`")
     if image_b64:
-        st.code(image_b64[:200] + "...", language="text")
+        st.code(image_b64[:300] + "...", language="text")
