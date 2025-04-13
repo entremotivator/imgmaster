@@ -125,7 +125,8 @@ with col1:
         with col_c:
             cfg_scale = st.slider("CFG Scale", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
         
-        mode = st.selectbox("Processing Mode", ["pro", "standard"])
+        # Fixed: Changed to use "std" or "pro" as required by API
+        mode = st.selectbox("Processing Mode", ["pro", "std"])
         
         submitted = st.form_submit_button("🚀 Generate Video")
 
@@ -181,13 +182,18 @@ with col2:
                 
                 # Prepare API request
                 url = "https://api.segmind.com/v1/kling-image2video"
+                
+                # Fixed: Ensure mode is either "std" or "pro" as required by API
+                if mode not in ["std", "pro"]:
+                    mode = "std"  # Default to "std" if somehow an invalid value is selected
+                
                 payload = {
                     "image": base64_image,
                     "prompt": prompt,
                     "negative_prompt": negative_prompt,
                     "cfg_scale": float(cfg_scale),
-                    "mode": mode,
-                    "duration": int(duration),
+                    "mode": mode,  # This is now guaranteed to be "std" or "pro"
+                    "duration": int(duration),  # This is already limited to 5 or 10 by the slider
                     "version": version
                 }
                 headers = {"x-api-key": api_key}
