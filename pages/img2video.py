@@ -42,7 +42,8 @@ with st.form("kling_form"):
 
     prompt = st.text_input("Prompt", "Kitten riding in an aeroplane and looking out the window.")
     negative_prompt = st.text_input("Negative Prompt", "No sudden movements, no fast zooms.")
-    duration = st.slider("Video Duration (seconds)", min_value=2, max_value=10, value=5)
+    duration = st.slider("Video Duration (seconds)", min_value=5, max_value=10, value=5, step=5)
+    version = st.selectbox("Kling Version", ["1.6", "1.5"])
     submitted = st.form_submit_button("Generate Video")
 
 # Main logic after submission
@@ -61,20 +62,21 @@ if submitted:
 
         if base64_image:
             url = "https://api.segmind.com/v1/kling-image2video"
-            data = {
-                "image": base64_image,
-                "prompt": prompt,
-                "negative_prompt": negative_prompt,
-                "cfg_scale": 0.5,
-                "mode": "pro",
-                "duration": duration
+            payload = {
+                "image": base64_image,  # REQUIRED
+                "prompt": prompt,  # REQUIRED
+                "negative_prompt": negative_prompt,  # Optional but recommended
+                "cfg_scale": 0.5,  # Must be float between 0-1
+                "mode": "pro",  # Only "pro" or "std"
+                "duration": duration,  # Only 5 or 10
+                "version": version  # REQUIRED for Kling 1.6
             }
 
             headers = {'x-api-key': api_key}
 
             with st.spinner("🚀 Generating video..."):
                 try:
-                    response = requests.post(url, json=data, headers=headers)
+                    response = requests.post(url, json=payload, headers=headers)
 
                     if response.status_code == 401:
                         error_msg = response.json().get("error", "Unauthorized access.")
