@@ -2,16 +2,9 @@ import streamlit as st
 import requests
 import base64
 
-# Use this function to convert an image file from the filesystem to base64
-def image_file_to_base64(image_path):
-    with open(image_path, 'rb') as f:
-        image_data = f.read()
-    return base64.b64encode(image_data).decode('utf-8')
-
-# Use this function to fetch an image from a URL and convert it to base64
-def image_url_to_base64(image_url):
-    response = requests.get(image_url)
-    image_data = response.content
+# Convert an image file object to base64
+def image_file_to_base64(file):
+    image_data = file.read()
     return base64.b64encode(image_data).decode('utf-8')
 
 # Sidebar input for API key
@@ -26,21 +19,23 @@ st.title("Kling Image-to-Video Generator")
 
 # Streamlit form for user input
 with st.form("kling_form"):
-    image_url = st.text_input("Image URL", "https://segmind-sd-models.s3.amazonaws.com/display_images/kling_ip.jpeg")
+    uploaded_file = st.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
     prompt = st.text_input("Prompt", "Kitten riding in an aeroplane and looking out the window.")
     submitted = st.form_submit_button("Generate")
 
-    if submitted:
+    if submitted and uploaded_file is not None:
         st.session_state.submitted = True
-        st.session_state.image_url = image_url
+        st.session_state.uploaded_file = uploaded_file
         st.session_state.prompt = prompt
 
 # Run only if form submitted and API key is provided
 if st.session_state.submitted and api_key:
     url = "https://api.segmind.com/v1/kling-image2video"
 
+    image_base64 = image_file_to_base64(st.session_state.uploaded_file)
+
     data = {
-        "image": image_url_to_base64(st.session_state.image_url),
+        "image": image_base64,
         "prompt": st.session_state.prompt,
         "negative_prompt": "No sudden movements, no fast zooms.",
         "cfg_scale": 0.5,
