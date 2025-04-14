@@ -108,6 +108,12 @@ if st.button("🚀 Generate Video"):
                 )
                 if res.status_code == 200:
                     st.success("✅ Video generated successfully!")
+                    
+                    # Show the video player in the app
+                    video_path = io.BytesIO(res.content)
+                    st.video(video_path, format="video/mp4")
+
+                    # Provide download button for the video
                     st.download_button(
                         label="⬇️ Download MP4",
                         data=res.content,
@@ -128,4 +134,3 @@ with st.expander("🛠️ Debug Info"):
         # Show only the first 300 characters of the base64 string
         st.markdown("**Base64 Image Data (first 300 characters):**")
         st.code(image_b64[:300] + "...", language="text")
-
